@@ -7,5 +7,11 @@ export const chunksTable = sqliteTable('chunks', {
   text: text('text').notNull(),
 })
 
+export const sourcesTable = sqliteTable('sources', {
+  url: text('url').primaryKey(),
+  title: text('title').notNull(),
+  savedAt: text('savedAt'),
+})
+
 export const chunkSelectSchema = createSelectSchema(chunksTable)
 export const chunkUpdateSchema = createUpdateSchema(chunksTable)

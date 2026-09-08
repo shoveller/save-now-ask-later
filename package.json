@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"@ai-sdk/openai-compatible": "^3.0.44",
+		"@ai-sdk/react": "^4.0.96",
 		"@cloudflare/ai-chat": "^0.11.0",
 		"agents": "^0.22.0",
 		"ai": "^7.0.93",

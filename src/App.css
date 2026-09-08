@@ -1,3 +1,29 @@
+.chat {
+  width: min(100%, 800px);
+  margin: 0 auto;
+  padding: 24px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.chat h1 { line-height: 1.1; }
+.messages { min-height: 35svh; padding-block: 24px; }
+.message { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.message p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.message small { display: block; }
+.chat form { display: grid; gap: 12px; }
+.chat textarea, .chat button {
+  font: inherit;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-h);
+  background: var(--bg);
+}
+.chat textarea { min-width: 0; resize: vertical; }
+.chat button { background: var(--accent-bg); cursor: pointer; }
+.chat button:disabled { opacity: 0.5; cursor: default; }
+
 .counter {
   font-size: 16px;
   padding: 5px 10px;
