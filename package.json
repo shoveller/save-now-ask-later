@@ -7,17 +7,23 @@
 		"dev": "vite",
 		"build": "tsc -b && vite build",
 		"lint": "eslint .",
+		"test:embeddings": "vitest run tests/RagAgent.test.ts",
 		"preview": "pnpm run build && vite preview",
 		"deploy": "pnpm run build && wrangler deploy",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"generate": "drizzle-kit generate"
 	},
 	"dependencies": {
 		"@ai-sdk/openai-compatible": "^3.0.44",
 		"@cloudflare/ai-chat": "^0.11.0",
 		"agents": "^0.22.0",
 		"ai": "^7.0.93",
+		"cloudflare": "^7.1.0",
+		"drizzle-orm": "1.0.0-rc.4",
 		"react": "^19.2.8",
-		"react-dom": "^19.2.8"
+		"react-dom": "^19.2.8",
+		"workers-ai-provider": "^4.0.0",
+		"zod": "^4.5.4"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.54.5",
@@ -26,6 +32,7 @@
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "^19.2.4",
 		"@vitejs/plugin-react": "^6.1.0",
+		"drizzle-kit": "1.0.0-rc.4",
 		"eslint": "^10.9.0",
 		"eslint-plugin-react-hooks": "^7.1.1",
 		"eslint-plugin-react-refresh": "^0.5.4",
@@ -33,6 +40,7 @@
 		"typescript": "~6.0.2",
 		"typescript-eslint": "^8.67.0",
 		"vite": "^8.2.2",
+		"vitest": "^5.0.0",
 		"wrangler": "^4.129.1"
 	},
 	"packageManager": "pnpm@10.33.2+sha512.a90faf6feeab71ad6c6e57f94e0fe1a12f5dcc22cd754db40ae9593eb6a3e0b6b12e3540218bb37ae083404b1f2ce6db2a4121e979829b4aff94b99f49da1cf8"

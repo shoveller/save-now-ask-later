@@ -14,24 +14,46 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
-	"migrations": [{
-		"tag": "v1",
-		"new_sqlite_classes": ["RagAgent"]
-	}],
+	"secrets": {
+		"required": [
+			"CF_API_KEY",
+			"API_SERVER_KEY",
+			"ACCOUNT_ID"
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"RagAgent"
+			]
+		}
+	],
 	"durable_objects": {
-		"bindings": [{
-			"class_name": "RagAgent",
-			"name": "RagAgent"
-		}]
+		"bindings": [
+			{
+				"class_name": "RagAgent",
+				"name": "RagAgent"
+			}
+		]
 	},
 	"ai": {
 		"binding": "AI",
 		"remote": true
 	},
-	"r2_buckets": [{
-		"bucket_name": "rag-agents-buckets",
-		"binding": "FILES"
-	}]
+	"r2_buckets": [
+		{
+			"bucket_name": "rag-agents-buckets",
+			"binding": "FILES"
+		}
+	],
+	"vectorize": [
+		{
+			"binding": "VECTORIZE",
+			"index_name": "hello-vectorize",
+			"remote": true
+		}
+	]
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

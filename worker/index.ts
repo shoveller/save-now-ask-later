@@ -1,12 +1,9 @@
-export default {
-  fetch(request) {
-    const url = new URL(request.url);
+import {routeAgentRequest} from "agents";
 
-    if (url.pathname.startsWith("/api/")) {
-      return Response.json({
-        name: "Cloudflare",
-      });
-    }
-		return new Response(null, { status: 404 });
+export { RagAgent } from './RagAgent.ts'
+
+export default {
+  async fetch(request, env) {
+	return await routeAgentRequest(request, env) || new Response(null, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
