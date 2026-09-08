@@ -1,0 +1,8 @@
+{
+  "name": "rag-agent-embeddings-test",
+  "compatibility_date": "2026-09-07",
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  }
+}
