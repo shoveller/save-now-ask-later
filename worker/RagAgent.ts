@@ -20,11 +20,9 @@ import {eq} from "drizzle-orm";
 export class RagAgent extends AIChatAgent {
     db: DrizzleSqliteDODatabase | undefined
 
-    onStart() {
-        void this.ctx.blockConcurrencyWhile(async () => {
-            this.db = drizzle(this.ctx.storage)
-            migrate(this.db, migrations)
-        })
+    override onStart() {
+        this.db = drizzle(this.ctx.storage)
+        migrate(this.db, migrations)
     }
 
     @callable()
@@ -59,46 +57,7 @@ export class RagAgent extends AIChatAgent {
         return workersAi.textEmbeddingModel("@cf/google/embeddinggemma-300m")
     }
 
-    async toEmbeddings(values: string[]) {
-        const {embeddings} = await embedMany({
-            model: this.embedModel,
-            values
-        })
-
-        return embeddings
-    }
-
-    async ingest() {
-        const db = this.db
-        if (!db) {
-            throw new Error('Database is not initialized')
-        }
-
-        const url = 'https://en.wikipedia.org/wiki/Korea'
-        const {success, result} = await this.toMarkdown(url)
-        if (!success || typeof result !== 'string') {
-            throw new Error('Failed to retrieve Markdown for chunking')
-        }
-        const chunks = this.toChunks(result)
-        const embeddings = await this.toEmbeddings(chunks)
-        const vectors = chunks.map((chunk, index) => {
-            const id = crypto.randomUUID()
-            db.insert(chunksTable).values({
-                id,
-                source: url,
-                text: chunk
-            }).run()
-
-            return {
-                id,
-                values: embeddings[index],
-                metadata: {source: url}
-            }
-        })
-        await this.env.VECTORIZE.upsert(vectors)
-    }
-
-    get llmModel() {
+    get llm() {
         const proxy = createOpenAICompatible({
             name: 'proxy',
             baseURL: 'https://cli-proxy.illuwa.click/v1',
@@ -108,9 +67,59 @@ export class RagAgent extends AIChatAgent {
         return proxy('gemini-3.8-flash-high')
     }
 
+    async toEmbeddings(values: string[]) {
+        const {embeddings} = await embedMany({
+            model: this.embedModel,
+            values
+        })
+
+        return embeddings
+    }
+
+    saveChunk({ id, text, source }: {id: string, source: string, text: string}) {
+        const db = this.db
+        if (!db) {
+            throw new Error('Database is not initialized')
+        }
+
+        db.insert(chunksTable).values({
+            id,
+            source,
+            text
+        }).run()
+    }
+
+    async toVectors({value, source, onChunk}:{value: string, source: string, onChunk: (param: {id: string, chunk: string}) => void}) {
+        const chunks = this.toChunks(value)
+        const embeddings = await this.toEmbeddings(chunks)
+
+        return chunks.map((chunk, index) => {
+            const id = crypto.randomUUID()
+            onChunk({ id, chunk })
+
+            return {
+                id,
+                values: embeddings[index],
+                metadata: {source}
+            }
+        })
+    }
+
+    async ingest() {
+        const url = 'https://en.wikipedia.org/wiki/Korea'
+        const {result} = await this.toMarkdown(url)
+
+        const vectors = await this.toVectors({
+            source: url,
+            value: result,
+            onChunk: ({ id, chunk }) => this.saveChunk({ id, source: url, text: chunk })
+        })
+        await this.env.VECTORIZE.upsert(vectors)
+    }
+
     async onChatMessage() {
         const result = streamText({
-            model: this.llmModel,
+            model: this.llm,
             messages: await convertToModelMessages(this.messages),
             tools: {
                 recall: tool({
