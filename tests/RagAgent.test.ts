@@ -4,6 +4,8 @@ import { RagAgent } from '../worker/RagAgent.ts'
 // Only stub the Durable Object shell; use the real embedding method and provider.
 vi.mock('@cloudflare/ai-chat', () => ({ AIChatAgent: class {} }))
 vi.mock('agents', () => ({ callable: () => () => undefined }))
+vi.mock('../worker/createAI.ts', () => ({ createAI: vi.fn() }))
+vi.mock('../drizzle/migrations.js', () => ({ default: {} }))
 
 const values = ['Korea is in East Asia.', 'Seoul is the capital of South Korea.']
 

@@ -13,9 +13,10 @@ import {drizzle, DrizzleSqliteDODatabase} from "drizzle-orm/durable-sqlite";
 import {migrate} from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "../drizzle/migrations.js";
 import {chunksTable} from "./schema.ts";
-import {createOpenAICompatible} from "@ai-sdk/openai-compatible";
 import {z} from "zod";
 import {eq} from "drizzle-orm";
+import {createAI} from "./createAI.ts";
+import type {BenchmarkSample} from "../shared/benchmark.ts";
 
 export class RagAgent extends AIChatAgent {
     db: DrizzleSqliteDODatabase | undefined
@@ -57,19 +58,53 @@ export class RagAgent extends AIChatAgent {
         return workersAi.textEmbeddingModel("@cf/google/embeddinggemma-300m")
     }
 
-    get llm() {
-        const proxy = createOpenAICompatible({
-            name: 'proxy',
-            baseURL: 'https://cli-proxy.illuwa.click/v1',
-            apiKey: this.env.API_SERVER_KEY
-        })
+    get embedModel2() {
+        const ai = createAI()
 
-        return proxy('gemini-3.8-flash-high')
+        return ai.embeddingModel('embeddinggemma:300m')
+    }
+
+    get llm() {
+        const ai = createAI()
+
+        return ai('gemini-3.8-flash-high')
+    }
+
+    @callable()
+    async benchmarkEmbedding(input: unknown): Promise<BenchmarkSample> {
+        const {model: key, text} = z.object({
+            model: z.enum(['embedModel', 'embedModel2']),
+            text: z.string().min(1).max(8000).refine(value => value.trim().length > 0)
+        }).parse(input)
+        const model = this[key]
+        const started = performance.now()
+        try {
+            const {embedding} = await embed({
+                model,
+                value: text,
+                maxRetries: 0,
+                abortSignal: AbortSignal.timeout(60_000)
+            })
+            const durationMs = performance.now() - started
+            if (!embedding.length || !embedding.every(Number.isFinite)) {
+                throw new Error('Invalid embedding response')
+            }
+            return {model: key, durationMs, dimensions: embedding.length, error: null}
+        } catch (error) {
+            // Provider errors may contain request URLs or credentials; keep them server-side.
+            console.error('Embedding benchmark failed', key, error)
+            return {
+                model: key,
+                durationMs: performance.now() - started,
+                dimensions: null,
+                error: '임베딩 호출 실패 또는 60초 제한 초과. 서버 로그를 확인하세요.'
+            }
+        }
     }
 
     async toEmbeddings(values: string[]) {
         const {embeddings} = await embedMany({
-            model: this.embedModel,
+            model: this.embedModel2,
             values
         })
 

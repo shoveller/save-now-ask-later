@@ -1,0 +1,30 @@
+.bench { padding: 32px; text-align: left; }
+.bench header, .bench-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.bench header { justify-content: space-between; margin-bottom: 48px; font-size: 14px; }
+.bench a { color: var(--accent); }
+.bench-eyebrow { color: var(--accent); font-size: 12px; letter-spacing: 2px; }
+.bench h1 { line-height: 1.15; margin: 16px 0; }
+.bench form, .bench article { border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+.bench form { margin-top: 28px; }
+.bench label { display: block; color: var(--text-h); }
+.bench textarea, .bench input { box-sizing: border-box; background: var(--bg); color: var(--text-h); border: 1px solid var(--border); border-radius: 8px; font: inherit; padding: 12px; }
+.bench textarea { width: 100%; resize: vertical; margin: 10px 0 16px; }
+.bench input { width: 80px; margin-left: 12px; }
+.bench button { border: 1px solid var(--accent-border); border-radius: 8px; padding: 12px 18px; background: var(--accent-bg); color: var(--text-h); font: inherit; cursor: pointer; }
+.bench button:disabled { opacity: .45; cursor: not-allowed; }
+.bench :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.bench small { font-size: 12px; }
+.bench form > small { display: block; margin-top: 16px; }
+.bench-status { margin: 24px 0; }
+.bench-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.bench code { overflow-wrap: anywhere; display: block; font-size: 12px; }
+.bench strong { display: block; font-size: 36px; color: var(--text-h); margin: 28px 0 12px; font-variant-numeric: tabular-nums; }
+.bench dl { display: grid; grid-template-columns: auto 1fr; gap: 12px; font-size: 14px; margin: 24px 0 0; }
+.bench dd { margin: 0; text-align: right; }
+.bench-comparison { padding: 20px; margin: 20px 0; background: var(--accent-bg); border-radius: 12px; color: var(--text-h); }
+.bench-note { font-size: 13px; margin-bottom: 32px; }
+.bench-table { overflow-x: auto; margin-top: 16px; }
+.bench table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bench th, .bench td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; }
+.bench-empty { padding: 32px; text-align: center; }
+@media (max-width: 700px) { .bench { padding: 20px; } .bench-cards { grid-template-columns: 1fr; } .bench form, .bench article { padding: 16px; } }
