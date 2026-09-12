@@ -14,15 +14,16 @@ import {drizzle} from "drizzle-orm/durable-sqlite";
 import {desc, eq, isNotNull} from "drizzle-orm";
 import {chunksTable, sourcesTable} from "./schema.js";
 import {migrateStorage} from "./migrate.js";
-import {createOpenAICompatible} from "@ai-sdk/openai-compatible";
 import {z} from "zod";
+import {createAI} from "./createAI.ts";
+import type {BenchmarkSample} from "../shared/benchmark.ts";
 
 export class RagAgent extends AIChatAgent {
     get db() {
         return drizzle(this.ctx.storage)
     }
 
-    onStart() {
+    override onStart() {
         const db = this.db
         migrateStorage(db)
         // Legacy chunks have no recorded title or save time; do not invent a date.
@@ -77,9 +78,53 @@ export class RagAgent extends AIChatAgent {
         return workersAi.textEmbeddingModel("@cf/baai/bge-base-en-v1.5")
     }
 
+    get embedModel2() {
+        const ai = createAI()
+
+        return ai.embeddingModel('embeddinggemma:300m')
+    }
+
+    get llm() {
+        const ai = createAI()
+
+        return ai('gemini-3.8-flash-high')
+    }
+
+    @callable()
+    async benchmarkEmbedding(input: unknown): Promise<BenchmarkSample> {
+        const {model: key, text} = z.object({
+            model: z.enum(['embedModel', 'embedModel2']),
+            text: z.string().min(1).max(8000).refine(value => value.trim().length > 0)
+        }).parse(input)
+        const model = this[key]
+        const started = performance.now()
+        try {
+            const {embedding} = await embed({
+                model,
+                value: text,
+                maxRetries: 0,
+                abortSignal: AbortSignal.timeout(60_000)
+            })
+            const durationMs = performance.now() - started
+            if (!embedding.length || !embedding.every(Number.isFinite)) {
+                throw new Error('Invalid embedding response')
+            }
+            return {model: key, durationMs, dimensions: embedding.length, error: null}
+        } catch (error) {
+            // Provider errors may contain request URLs or credentials; keep them server-side.
+            console.error('Embedding benchmark failed', key, error)
+            return {
+                model: key,
+                durationMs: performance.now() - started,
+                dimensions: null,
+                error: '임베딩 호출 실패 또는 60초 제한 초과. 서버 로그를 확인하세요.'
+            }
+        }
+    }
+
     async toEmbeddings(values: string[]) {
         const {embeddings} = await embedMany({
-            model: this.embedModel,
+            model: this.embedModel2,
             values
         })
 
@@ -120,7 +165,7 @@ export class RagAgent extends AIChatAgent {
 
     async recall(question: string) {
         if (!question.trim()) throw new Error('Question must not be empty')
-        const {embedding} = await embed({model: this.embedModel, value: question})
+        const {embedding} = await embed({model: this.embedModel2, value: question})
         if (embedding.length !== 768 || embedding.some(value => !Number.isFinite(value))) {
             throw new Error('Expected a finite 768-dimensional question embedding')
         }
@@ -138,19 +183,9 @@ export class RagAgent extends AIChatAgent {
             .orderBy(desc(sourcesTable.savedAt), sourcesTable.url).all()
     }
 
-    get llmModel() {
-        const proxy = createOpenAICompatible({
-            name: 'proxy',
-            baseURL: 'https://cli-proxy.illuwa.click/v1',
-            apiKey: this.env.API_SERVER_KEY
-        })
-
-        return proxy('gemini-3.8-flash-high')
-    }
-
     async onChatMessage() {
         const result = streamText({
-            model: this.llmModel,
+            model: this.llm,
             instructions: `You help users save webpages and answer questions about saved content.
                 Call saveUrl when the user pastes a webpage URL, even without an explicit save request.
                 Call recall before answering content questions,

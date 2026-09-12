@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { RagAgent } from '../worker/RagAgent.ts'
-import { streamText } from 'ai'
+import { embedMany, streamText } from 'ai'
 import {drizzle} from 'drizzle-orm/node-sqlite'
 import {migrate} from 'drizzle-orm/durable-sqlite/migrator'
 import {eq} from 'drizzle-orm'
@@ -11,6 +11,21 @@ import migrations from '../drizzle/migrations.js'
 // Only stub the Durable Object shell; use the real embedding method and provider.
 vi.mock('@cloudflare/ai-chat', () => ({ AIChatAgent: class {} }))
 vi.mock('agents', () => ({ callable: () => () => undefined }))
+vi.mock('../worker/createAI.ts', async () => {
+  const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible')
+  return {createAI: () => createOpenAICompatible({
+    name: 'test-proxy',
+    baseURL: 'https://embedding.test/v1',
+    fetch: async (_url, init) => {
+      const request = JSON.parse(String(init?.body))
+      const result = await run(request.model, {text: request.input}, {})
+      return Response.json({
+        data: result.data.map((embedding: number[], index: number) => ({embedding, index})),
+        usage: {prompt_tokens: 1, total_tokens: 1},
+      })
+    },
+  })}
+})
 vi.mock('ai', async importOriginal => ({
   ...await importOriginal<typeof import('ai')>(),
   streamText: vi.fn(),
@@ -88,7 +103,7 @@ test('recall embeds the question and resolves topK5 matches through SQL in rank 
     id: row.id, text: row.text, url: row.source,
   })))
   expect(query).toHaveBeenCalledWith(expect.any(Array), {topK: 5, namespace: 'agent-1'})
-  expect(run).toHaveBeenLastCalledWith('@cf/baai/bge-base-en-v1.5',
+  expect(run).toHaveBeenLastCalledWith('embeddinggemma:300m',
     expect.objectContaining({text: ['What was saved?']}), expect.anything())
 })
 
@@ -254,16 +269,16 @@ function checkDimensions(embeddings: number[][]) {
   }
 }
 
-test('toEmbeddings preserves vector count and dimensions from a mocked AI binding', async () => {
+test('toEmbeddings uses the self-hosted model and preserves vector count and dimensions', async () => {
   const data = values.map(() => Array.from({ length: 768 }, (_, i) => i / 768))
-  const run = vi.fn().mockResolvedValue({ shape: [values.length, 768], data })
+  run.mockResolvedValue({ shape: [values.length, 768], data })
   const agent = Object.create(RagAgent.prototype) as RagAgent
   Object.defineProperty(agent, 'env', { value: { AI: { run } } })
 
   const embeddings = await agent.toEmbeddings(values)
 
   expect(run).toHaveBeenCalledWith(
-    '@cf/baai/bge-base-en-v1.5',
+    'embeddinggemma:300m',
     expect.objectContaining({ text: values }),
     expect.anything(),
   )
@@ -273,7 +288,7 @@ test('toEmbeddings preserves vector count and dimensions from a mocked AI bindin
 
 // Opt in explicitly: this test uses Cloudflare authentication and billable AI usage.
 test.skipIf(process.env.RUN_REMOTE_EMBEDDINGS !== '1')(
-  'toEmbeddings returns 768-dimensional vectors from the real model',
+  'Cloudflare benchmark model returns 768-dimensional vectors from the real binding',
   async () => {
     vi.unstubAllGlobals()
     const { getPlatformProxy } = await import('wrangler')
@@ -286,7 +301,7 @@ test.skipIf(process.env.RUN_REMOTE_EMBEDDINGS !== '1')(
     try {
       const agent = Object.create(RagAgent.prototype) as RagAgent
       Object.defineProperty(agent, 'env', { value: platform.env })
-      const embeddings = await agent.toEmbeddings(values)
+      const {embeddings} = await embedMany({model: agent.embedModel, values})
 
       console.log('Actual embedding dimensions:', embeddings.map(vector => vector.length))
       checkDimensions(embeddings)
