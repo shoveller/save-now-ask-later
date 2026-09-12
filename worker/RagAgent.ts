@@ -81,7 +81,7 @@ export class RagAgent extends AIChatAgent {
     get embedModel2() {
         const ai = createAI()
 
-        return ai.embeddingModel('embeddinggemma:300m')
+        return ai.embeddingModel('embeddinggemma:300m-qat-q4_0')
     }
 
     get llm() {
@@ -124,7 +124,7 @@ export class RagAgent extends AIChatAgent {
 
     async toEmbeddings(values: string[]) {
         const {embeddings} = await embedMany({
-            model: this.embedModel,
+            model: this.embedModel2,
             values
         })
 
@@ -167,7 +167,7 @@ export class RagAgent extends AIChatAgent {
 
     async recall(question: string) {
         if (!question.trim()) throw new Error('Question must not be empty')
-        const model = this.embedModel
+        const model = this.embedModel2
         const embeddingStarted = performance.now()
         const {embedding} = await embed({model, value: question})
         const embeddingDurationMs = performance.now() - embeddingStarted
