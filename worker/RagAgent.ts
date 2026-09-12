@@ -75,7 +75,7 @@ export class RagAgent extends AIChatAgent {
 
     get embedModel() {
         const workersAi = createWorkersAI({binding: this.env.AI})
-        return workersAi.textEmbeddingModel("@cf/baai/bge-base-en-v1.5")
+        return workersAi.textEmbeddingModel("@cf/google/embeddinggemma-300m")
     }
 
     get embedModel2() {
@@ -124,7 +124,7 @@ export class RagAgent extends AIChatAgent {
 
     async toEmbeddings(values: string[]) {
         const {embeddings} = await embedMany({
-            model: this.embedModel2,
+            model: this.embedModel,
             values
         })
 
@@ -167,7 +167,7 @@ export class RagAgent extends AIChatAgent {
 
     async recall(question: string) {
         if (!question.trim()) throw new Error('Question must not be empty')
-        const model = this.embedModel2
+        const model = this.embedModel
         const embeddingStarted = performance.now()
         const {embedding} = await embed({model, value: question})
         const embeddingDurationMs = performance.now() - embeddingStarted
