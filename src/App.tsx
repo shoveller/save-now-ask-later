@@ -1,6 +1,8 @@
 import {useAgent} from "agents/react";
 import {useAgentChat} from "agents/chat/react";
 import {useState} from 'react';
+import {isToolUIPart} from 'ai';
+import ToolStatus from './ToolStatus';
 import './App.css';
 
 function App() {
@@ -22,8 +24,8 @@ function App() {
             <strong>{message.role === 'user' ? 'You' : 'Assistant'}</strong>
             {message.parts.map((part, index) => part.type === 'text'
               ? <p key={index}>{part.text}</p>
-              : part.type.startsWith('tool-') || part.type === 'dynamic-tool'
-                ? <small key={index}>Tool: {part.type}</small>
+              : isToolUIPart(part)
+                ? <ToolStatus key={index} part={part}/>
                 : null)}
           </article>
         ))}

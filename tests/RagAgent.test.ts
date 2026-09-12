@@ -99,7 +99,7 @@ test('recall embeds the question and resolves topK5 matches through SQL in rank 
   await agent.saveUrl('https://example.com')
   const rows = db.select().from(chunksTable).all()
   query.mockResolvedValue({matches: [{id: rows[1].id}, {id: 'missing'}, {id: rows[0].id}]})
-  expect(await agent.recall('What was saved?')).toEqual([rows[1], rows[0]].map(row => ({
+  expect((await agent.recall('What was saved?')).matches).toEqual([rows[1], rows[0]].map(row => ({
     id: row.id, text: row.text, url: row.source,
   })))
   expect(query).toHaveBeenCalledWith(expect.any(Array), {topK: 5, namespace: 'agent-1'})
@@ -108,8 +108,27 @@ test('recall embeds the question and resolves topK5 matches through SQL in rank 
 })
 
 test('empty recall and source list return no fabricated evidence', async () => {
-  expect(await agent.recall('Unknown?')).toEqual([])
+  expect((await agent.recall('Unknown?')).matches).toEqual([])
   expect(agent.listSources()).toEqual([])
+})
+
+test('embedding timings exclude document fetch, vector storage and search, including empty results', async () => {
+  let clock = 0
+  vi.spyOn(performance, 'now').mockImplementation(() => clock)
+  browserFetch.mockImplementation(async () => {
+    clock += 1000
+    return Response.json({success: true, result: '# Timing test'})
+  })
+  run.mockImplementation(async (_model, input: {text: string[]}) => {
+    clock += 125
+    return {data: input.text.map(() => Array.from({length: 768}, () => 0.1))}
+  })
+  upsert.mockImplementation(async () => { clock += 2000 })
+  query.mockImplementation(async () => { clock += 3000; return {matches: []} })
+
+  expect((await agent.saveUrl('https://example.com')).embeddingDurationMs).toBe(125)
+  expect(await agent.recall('What was saved?')).toEqual({matches: [], embeddingDurationMs: 125})
+  expect(clock).toBe(6250)
 })
 
 test.each([false, true])('startup preserves pre-migration data (existing sources: %s)', existingSources => {
@@ -248,7 +267,7 @@ test('chat exposes all three executable tools with evidence instructions and a m
   expect(options.instructions).toContain('even without an explicit save request')
   expect(options.stopWhen).toBeTypeOf('function')
   const save = vi.spyOn(agent, 'saveUrl').mockResolvedValue({} as Awaited<ReturnType<RagAgent['saveUrl']>>)
-  const recall = vi.spyOn(agent, 'recall').mockResolvedValue([])
+  const recall = vi.spyOn(agent, 'recall').mockResolvedValue({matches: [], embeddingDurationMs: 0})
   const list = vi.spyOn(agent, 'listSources').mockReturnValue([])
   const execution = {toolCallId: 'test', messages: []}
   await options.tools!.saveUrl.execute!({url: 'https://example.com'}, execution)

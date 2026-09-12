@@ -11,6 +11,15 @@
 .message { padding: 16px 0; border-bottom: 1px solid var(--border); }
 .message p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .message small { display: block; }
+.tool-status { margin-block: 8px; }
+.message .embedding-time {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  font-variant-numeric: tabular-nums;
+}
 .chat form { display: grid; gap: 12px; }
 .chat textarea, .chat button {
   font: inherit;

@@ -140,7 +140,9 @@ export class RagAgent extends AIChatAgent {
         const title = markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() || url
         const savedAt = new Date().toISOString()
         const chunks = this.toChunks(markdown)
+        const embeddingStarted = performance.now()
         const embeddings = await this.toEmbeddings(chunks)
+        const embeddingDurationMs = performance.now() - embeddingStarted
         const vectors = chunks.map((_, index) => {
             const id = crypto.randomUUID()
             return {
@@ -159,13 +161,16 @@ export class RagAgent extends AIChatAgent {
             tx.insert(sourcesTable).values({url, title, savedAt})
                 .onConflictDoUpdate({target: sourcesTable.url, set: {title, savedAt}}).run()
         })
-        return {url, title, savedAt, chunks: chunks.length, status: 'saved',
+        return {url, title, savedAt, chunks: chunks.length, status: 'saved', embeddingDurationMs,
             note: 'Search indexing is asynchronous; newly saved content may not be searchable immediately.'}
     }
 
     async recall(question: string) {
         if (!question.trim()) throw new Error('Question must not be empty')
-        const {embedding} = await embed({model: this.embedModel2, value: question})
+        const model = this.embedModel2
+        const embeddingStarted = performance.now()
+        const {embedding} = await embed({model, value: question})
+        const embeddingDurationMs = performance.now() - embeddingStarted
         if (embedding.length !== 768 || embedding.some(value => !Number.isFinite(value))) {
             throw new Error('Expected a finite 768-dimensional question embedding')
         }
@@ -173,9 +178,10 @@ export class RagAgent extends AIChatAgent {
             topK: 5, namespace: this.ctx.id.toString()
         })
         const db = this.db
-        return matches.flatMap(match => db.select({
+        const results = matches.flatMap(match => db.select({
             id: chunksTable.id, text: chunksTable.text, url: chunksTable.source,
         }).from(chunksTable).where(eq(chunksTable.id, match.id)).all())
+        return {matches: results, embeddingDurationMs}
     }
 
     listSources() {
