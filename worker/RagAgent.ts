@@ -17,6 +17,7 @@ import {migrateStorage} from "./migrate.js";
 import {z} from "zod";
 import {createAI} from "./createAI.ts";
 import type {BenchmarkSample} from "../shared/benchmark.ts";
+import {e5BatchSize, e5Dimensions, e5ModelId, e5TextByteLimit, embeddingCharacterBytes, embeddingTextBytes} from "../shared/embedding.ts";
 
 export class RagAgent extends AIChatAgent {
     get db() {
@@ -59,15 +60,24 @@ export class RagAgent extends AIChatAgent {
     }
 
     toChunks(value: string) {
-        const chunkSize = 800
-        const overlap = 200
+        const overlapBytes = 96
         const characters = Array.from(value)
+        const sizes = characters.map(embeddingCharacterBytes)
         const chunks: string[] = []
-
-        for (let start = 0; start < characters.length; start += chunkSize - overlap) {
-            const chunk = characters.slice(start, start + chunkSize).join('')
+        for (let start = 0; start < characters.length;) {
+            let end = start
+            let bytes = 0
+            while (end < characters.length && bytes + sizes[end] <= e5TextByteLimit) {
+                bytes += sizes[end++]
+            }
+            if (end === start) throw new Error('A character exceeds the embedding input budget')
+            const chunk = characters.slice(start, end).join('')
             if (chunk.trim()) chunks.push(chunk)
-            if (start + chunkSize >= characters.length) break
+            if (end === characters.length) break
+            let next = end
+            let overlap = 0
+            while (next > start + 1 && overlap + sizes[next - 1] <= overlapBytes) overlap += sizes[--next]
+            start = next
         }
 
         return chunks
@@ -81,7 +91,7 @@ export class RagAgent extends AIChatAgent {
     get embedModel2() {
         const ai = createAI()
 
-        return ai.embeddingModel('embeddinggemma:300m-qat-q4_0')
+        return ai.embeddingModel(e5ModelId)
     }
 
     get llm() {
@@ -95,13 +105,15 @@ export class RagAgent extends AIChatAgent {
         const {model: key, text} = z.object({
             model: z.enum(['embedModel', 'embedModel2']),
             text: z.string().min(1).max(8000).refine(value => value.trim().length > 0)
+                .refine(value => embeddingTextBytes(value) <= e5TextByteLimit, 'Use at most 480 normalized UTF-8 bytes')
         }).parse(input)
         const model = this[key]
         const started = performance.now()
         try {
             const {embedding} = await embed({
                 model,
-                value: text,
+                value: key === 'embedModel2' ? `query: ${text}` : text,
+                ...(key === 'embedModel2' ? {headers: {'Cache-Control': 'no-store'}} : {}),
                 maxRetries: 0,
                 abortSignal: AbortSignal.timeout(60_000)
             })
@@ -123,14 +135,20 @@ export class RagAgent extends AIChatAgent {
     }
 
     async toEmbeddings(values: string[]) {
-        const {embeddings} = await embedMany({
-            model: this.embedModel2,
-            values
-        })
-
-        if (embeddings.length !== values.length || embeddings.some(vector =>
-            vector.length !== 768 || vector.some(value => !Number.isFinite(value)))) {
-            throw new Error('Expected one finite 768-dimensional embedding per chunk')
+        if (values.some(value => embeddingTextBytes(value) > e5TextByteLimit)) {
+            throw new Error('Document chunk exceeds the E5 input budget')
+        }
+        const embeddings: number[][] = []
+        const model = this.embedModel2
+        for (let offset = 0; offset < values.length; offset += e5BatchSize) {
+            const batch = values.slice(offset, offset + e5BatchSize)
+            const result = await embedMany({model, values: batch.map(value => `passage: ${value}`),
+                maxParallelCalls: 1, maxRetries: 0, abortSignal: AbortSignal.timeout(120_000)})
+            if (result.embeddings.length !== batch.length || result.embeddings.some(vector =>
+                vector.length !== e5Dimensions || vector.some(value => !Number.isFinite(value)))) {
+                throw new Error('Expected one finite 384-dimensional embedding per chunk')
+            }
+            embeddings.push(...result.embeddings)
         }
         return embeddings
     }
@@ -153,7 +171,9 @@ export class RagAgent extends AIChatAgent {
             }
         })
         // Vectorize is eventually consistent. Only publish SQL sources after acceptance.
-        await this.env.VECTORIZE.upsert(vectors)
+        for (let offset = 0; offset < vectors.length; offset += 100) {
+            await this.env.VECTORIZE.upsert(vectors.slice(offset, offset + 100))
+        }
         this.db.transaction(tx => {
             for (const [index, vector] of vectors.entries()) {
                 tx.insert(chunksTable).values({id: vector.id, source: url, text: chunks[index]}).run()
@@ -167,12 +187,13 @@ export class RagAgent extends AIChatAgent {
 
     async recall(question: string) {
         if (!question.trim()) throw new Error('Question must not be empty')
+        if (embeddingTextBytes(question) > e5TextByteLimit) throw new Error('Question is too long; shorten it to at most 480 normalized UTF-8 bytes')
         const model = this.embedModel2
         const embeddingStarted = performance.now()
-        const {embedding} = await embed({model, value: question})
+        const {embedding} = await embed({model, value: `query: ${question}`, maxRetries: 0, abortSignal: AbortSignal.timeout(60_000)})
         const embeddingDurationMs = performance.now() - embeddingStarted
-        if (embedding.length !== 768 || embedding.some(value => !Number.isFinite(value))) {
-            throw new Error('Expected a finite 768-dimensional question embedding')
+        if (embedding.length !== e5Dimensions || embedding.some(value => !Number.isFinite(value))) {
+            throw new Error('Expected a finite 384-dimensional question embedding')
         }
         const {matches} = await this.env.VECTORIZE.query(embedding, {
             topK: 5, namespace: this.ctx.id.toString()

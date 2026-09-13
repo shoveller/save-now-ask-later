@@ -23,7 +23,7 @@ test('measures the selected model, disables retries and returns metadata without
   vi.spyOn(performance, 'now').mockReturnValueOnce(100).mockReturnValueOnce(125)
   const agent = makeAgent()
   const result = await agent.benchmarkEmbedding({model: 'embedModel2', text: 'hello'})
-  expect(embed).toHaveBeenCalledWith({model: agent.embedModel2, value: 'hello', maxRetries: 0, abortSignal: expect.any(AbortSignal)})
+  expect(embed).toHaveBeenCalledWith({model: agent.embedModel2, value: 'query: hello', headers: {'Cache-Control':'no-store'}, maxRetries: 0, abortSignal: expect.any(AbortSignal)})
   expect(result).toEqual({model: 'embedModel2', durationMs: 25, dimensions: 3, error: null})
 })
 

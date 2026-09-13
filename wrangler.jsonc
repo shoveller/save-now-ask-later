@@ -50,7 +50,7 @@
 	"vectorize": [
 		{
 			"binding": "VECTORIZE",
-			"index_name": "hello-vectorize",
+			"index_name": "save-now-ask-later-e5-fp32",
 			"remote": true
 		}
 	]

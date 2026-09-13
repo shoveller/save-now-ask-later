@@ -4,6 +4,7 @@ import {benchmarkModels, summarize} from '../shared/benchmark'
 import type {BenchmarkRow, BenchmarkSample} from '../shared/benchmark'
 import './Bench.css'
 import {initialText} from "./initialText.ts";
+import {e5ModelId, e5TextByteLimit, embeddingTextBytes, embeddingTextPreview} from '../shared/embedding';
 
 const ms = (value: number | null) => value === null ? '—' : `${value.toFixed(1)} ms`
 
@@ -15,7 +16,7 @@ export default function Bench() {
     onOpen: () => setConnected(true),
     onClose: () => setConnected(false),
   })
-  const [text, setText] = useState(() => initialText.slice(0, 1000))
+  const [text, setText] = useState(() => embeddingTextPreview(initialText))
   const [repetitions, setRepetitions] = useState(5)
   const [rows, setRows] = useState<BenchmarkRow[]>([])
   const [running, setRunning] = useState(false)
@@ -23,8 +24,9 @@ export default function Bench() {
   const stop = useRef(false)
   const busy = useRef(false)
   useEffect(() => () => { stop.current = true }, [])
-  const inputError = text.length > 8000
-    ? `입력이 ${text.length.toLocaleString()}자입니다. 8,000자 이하로 줄여 주세요.`
+  const inputBytes = embeddingTextBytes(text)
+  const inputError = inputBytes > e5TextByteLimit
+    ? `입력이 ${inputBytes.toLocaleString()} bytes입니다. E5 비교 입력은 ${e5TextByteLimit} bytes 이하로 줄여 주세요.`
     : !text.trim() ? '측정할 텍스트를 입력해 주세요.' : null
 
   async function run() {
@@ -71,10 +73,10 @@ export default function Bench() {
     <h1>임베딩 속도 비교</h1>
     <p>동일한 텍스트를 두 모델에 순차 호출합니다. 최초 순서는 무작위이며, 매 회차 순서를 교대합니다.</p>
     <form onSubmit={event => { event.preventDefault(); void run() }}>
-      <label htmlFor="bench-text">입력 텍스트 <small>({text.length.toLocaleString()} / 8,000자)</small></label>
+      <label htmlFor="bench-text">입력 텍스트 <small>({inputBytes.toLocaleString()} / {e5TextByteLimit} bytes)</small></label>
       <textarea id="bench-text" value={text} onChange={event => setText(event.target.value)} aria-invalid={!!inputError} aria-describedby="bench-input-help" required disabled={running} rows={5}/>
-      <p id="bench-input-help"><small>{inputError ?? '기본 입력은 원문의 앞 1,000자입니다. 8,000자는 화면 입력 제한이며, 모델의 토큰 한도와는 다릅니다.'}</small></p>
-      {text.length > 8000 && <button type="button" disabled={running} onClick={() => setText(previous => previous.slice(0, 1000))}>앞 1,000자만 사용</button>}
+      <p id="bench-input-help"><small>{inputError ?? 'E5의 입력 잘림을 피하기 위한 보수적인 NFKC UTF-8 크기 제한입니다. E5에는 query: 접두어를 추가하며 BFF 캐시는 우회합니다.'}</small></p>
+      {inputBytes > e5TextByteLimit && <button type="button" disabled={running} onClick={() => setText(embeddingTextPreview)}>앞부분만 사용</button>}
       <div className="bench-controls">
         <label htmlFor="bench-count">모델별 측정 횟수
           <input id="bench-count" type="number" min={1} max={20} required value={repetitions} disabled={running} onChange={event => setRepetitions(event.target.valueAsNumber)}/>
@@ -94,7 +96,7 @@ export default function Bench() {
           .map(row => row.dimensions))]
         return <article key={model}>
           <h2>{model}</h2>
-          <code>{index === 0 ? '@cf/baai/bge-base-en-v1.5' : 'embeddinggemma:300m'}</code>
+          <code>{index === 0 ? '@cf/google/embeddinggemma-300m' : e5ModelId}</code>
           <strong>{ms(stat.median)}</strong><p>본 측정 중앙값</p>
           <dl>
             <dt>임베딩 차원</dt><dd>{dimensions.length ? dimensions.map(value => `${value}차원`).join(' / ') : '—'}</dd>

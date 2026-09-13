@@ -45,8 +45,8 @@ beforeEach(() => {
   db = drizzle({client: database})
   agent = Object.create(RagAgent.prototype) as RagAgent
   run = vi.fn().mockImplementation(async (_model, input: {text: string[]}) => ({
-    shape: [input.text.length, 768],
-    data: input.text.map(() => Array.from({length: 768}, () => 0.1)),
+    shape: [input.text.length, 384],
+    data: input.text.map(() => Array.from({length: 384}, () => 0.1)),
   }))
   upsert = vi.fn().mockResolvedValue({mutationId: 'queued'})
   query = vi.fn().mockResolvedValue({matches: []})
@@ -86,11 +86,11 @@ test('save uses only Browser Run Markdown JSON and persists matching chunk/vecto
   )
   const rows = db.select().from(chunksTable).all()
   const vectors = upsert.mock.calls[0][0]
-  expect(rows).toHaveLength(3)
+  expect(rows).toHaveLength(4)
   expect(vectors.map((vector: {id: string}) => vector.id)).toEqual(rows.map(row => row.id))
   expect(vectors.every((vector: {namespace: string, values: number[]}) =>
-    vector.namespace === 'agent-1' && vector.values.length === 768)).toBe(true)
-  expect(rows.every(row => Array.from(String(row.text)).length <= 800)).toBe(true)
+    vector.namespace === 'agent-1' && vector.values.length === 384)).toBe(true)
+  expect(rows.every(row => new TextEncoder().encode(String(row.text).normalize('NFKC')).length <= 480)).toBe(true)
   expect(agent.listSources()).toEqual([{url: result.url, title: 'Example', savedAt: result.savedAt}])
   expect(Number.isNaN(Date.parse(result.savedAt))).toBe(false)
 })
@@ -103,8 +103,8 @@ test('recall embeds the question and resolves topK5 matches through SQL in rank 
     id: row.id, text: row.text, url: row.source,
   })))
   expect(query).toHaveBeenCalledWith(expect.any(Array), {topK: 5, namespace: 'agent-1'})
-  expect(run).toHaveBeenLastCalledWith('embeddinggemma:300m',
-    expect.objectContaining({text: ['What was saved?']}), expect.anything())
+  expect(run).toHaveBeenLastCalledWith('multilingual-e5-small-fp32',
+    expect.objectContaining({text: ['query: What was saved?']}), expect.anything())
 })
 
 test('empty recall and source list return no fabricated evidence', async () => {
@@ -121,7 +121,7 @@ test('embedding timings exclude document fetch, vector storage and search, inclu
   })
   run.mockImplementation(async (_model, input: {text: string[]}) => {
     clock += 125
-    return {data: input.text.map(() => Array.from({length: 768}, () => 0.1))}
+    return {data: input.text.map(() => Array.from({length: 384}, () => 0.1))}
   })
   upsert.mockImplementation(async () => { clock += 2000 })
   query.mockImplementation(async () => { clock += 3000; return {matches: []} })
@@ -218,8 +218,8 @@ test('wrong vector dimensions fail before storage or query', async () => {
   run.mockImplementation(async (_model, input: {text: string[]}) => ({
     data: input.text.map(() => [0.1, 0.2]),
   }))
-  await expect(agent.saveUrl('https://example.com')).rejects.toThrow('768-dimensional')
-  await expect(agent.recall('Question')).rejects.toThrow('768-dimensional')
+  await expect(agent.saveUrl('https://example.com')).rejects.toThrow('384-dimensional')
+  await expect(agent.recall('Question')).rejects.toThrow('384-dimensional')
   expect(upsert).not.toHaveBeenCalled()
   expect(query).not.toHaveBeenCalled()
 })
@@ -250,10 +250,35 @@ test('SQL write failures roll back chunks and sources; list errors are not hidde
   expect(() => agent.listSources()).toThrow()
 })
 
-test('Unicode chunking uses 800 characters with 200 character overlap', () => {
+test('Unicode chunking keeps conservative normalized byte limits and preserves overlap', () => {
   const chunks = agent.toChunks('\u{1F600}'.repeat(1400))
-  expect(chunks.map(chunk => Array.from(chunk).length)).toEqual([800, 800])
+  expect(chunks).toHaveLength(15)
+  expect(Array.from(chunks[0])).toHaveLength(120)
+  expect(chunks.every(chunk => new TextEncoder().encode(chunk).length <= 480)).toBe(true)
+  const expanded = agent.toChunks('ﷺ'.repeat(100))
+  expect(expanded.every(chunk => new TextEncoder().encode(chunk.normalize('NFKC')).length <= 480)).toBe(true)
   expect(agent.toChunks('  ')).toEqual([])
+})
+
+test('E5 document requests are prefixed and sent in bounded batches', async () => {
+  const values = Array.from({length:130}, (_,i) => `chunk ${i}`)
+  expect(await agent.toEmbeddings(values)).toHaveLength(130)
+  expect(run.mock.calls.map(call => call[1].text.length)).toEqual([64,64,2])
+  expect(run.mock.calls.flatMap(call => call[1].text)).toEqual(values.map(value => `passage: ${value}`))
+  run.mockClear()
+  await expect(agent.toEmbeddings(['가'.repeat(161)])).rejects.toThrow('input budget')
+  await expect(agent.recall('가'.repeat(161))).rejects.toThrow('too long')
+  expect(run).not.toHaveBeenCalled()
+})
+
+test('large saves split Vectorize writes and retain matching chunk IDs', async () => {
+  browserFetch.mockResolvedValue(Response.json({success:true,result:'# Large\n'+'a'.repeat(40000)}))
+  const result = await agent.saveUrl('https://example.com/large')
+  expect(upsert.mock.calls.length).toBeGreaterThan(1)
+  expect(upsert.mock.calls.every(call => call[0].length <= 100)).toBe(true)
+  const vectors = upsert.mock.calls.flatMap(call => call[0])
+  expect(vectors).toHaveLength(result.chunks)
+  expect(db.select().from(chunksTable).all().map(row=>row.id)).toEqual(vectors.map(vector=>vector.id))
 })
 
 test('chat exposes all three executable tools with evidence instructions and a multi-step loop', async () => {
@@ -280,25 +305,25 @@ test('chat exposes all three executable tools with evidence instructions and a m
 
 const values = ['Korea is in East Asia.', 'Seoul is the capital of South Korea.']
 
-function checkDimensions(embeddings: number[][]) {
+function checkDimensions(embeddings: number[][], dimensions = 384) {
   expect(embeddings).toHaveLength(values.length)
   for (const embedding of embeddings) {
-    expect(embedding).toHaveLength(768)
+    expect(embedding).toHaveLength(dimensions)
     expect(embedding.every(value => Number.isFinite(value))).toBe(true)
   }
 }
 
 test('toEmbeddings uses the self-hosted model and preserves vector count and dimensions', async () => {
-  const data = values.map(() => Array.from({ length: 768 }, (_, i) => i / 768))
-  run.mockResolvedValue({ shape: [values.length, 768], data })
+  const data = values.map(() => Array.from({ length: 384 }, (_, i) => i / 384))
+  run.mockResolvedValue({ shape: [values.length, 384], data })
   const agent = Object.create(RagAgent.prototype) as RagAgent
   Object.defineProperty(agent, 'env', { value: { AI: { run } } })
 
   const embeddings = await agent.toEmbeddings(values)
 
   expect(run).toHaveBeenCalledWith(
-    'embeddinggemma:300m',
-    expect.objectContaining({ text: values }),
+    'multilingual-e5-small-fp32',
+    expect.objectContaining({ text: values.map(value => `passage: ${value}`) }),
     expect.anything(),
   )
   expect(embeddings).toEqual(data)
@@ -323,7 +348,7 @@ test.skipIf(process.env.RUN_REMOTE_EMBEDDINGS !== '1')(
       const {embeddings} = await embedMany({model: agent.embedModel, values})
 
       console.log('Actual embedding dimensions:', embeddings.map(vector => vector.length))
-      checkDimensions(embeddings)
+      checkDimensions(embeddings, 768)
     } finally {
       await platform.dispose()
     }
